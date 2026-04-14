@@ -167,6 +167,17 @@ class OnePanelAPI {
     }
   }
 
+  async getWebsiteById(id) {
+    try {
+      const response = await this.apiClient.get(`/websites/${id}`);
+      const website = this.unwrapData(response);
+
+      return this.normalizeWebsite(website);
+    } catch (error) {
+      throw new Error(`Get website by id failed: ${error.message}`);
+    }
+  }
+
   /**
    * Get details of a specific website by domain
    * @param {string} domain - Website domain
@@ -187,6 +198,14 @@ class OnePanelAPI {
 
         return false;
       });
+
+      if (!website) {
+        return null;
+      }
+
+      if (website.id && !website.sitePath) {
+        return await this.getWebsiteById(website.id);
+      }
 
       return website;
     } catch (error) {

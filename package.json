@@ -1,6 +1,6 @@
 {
   "name": "1panel-cli",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "An AI-friendly CLI for deploying static websites to 1Panel.",
   "keywords": [
     "1Panel",
