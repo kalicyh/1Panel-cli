@@ -121,6 +121,7 @@ The repository also includes an agent-oriented skill:
 
 - The CLI targets the current 1Panel API base path: `/api/v2`
 - Website listing prefers `GET /websites/list`
+- Website upload resolves full website details through `GET /websites/:id` when `sitePath` is not present in list responses
 - Automatic creation uses the current `request.WebsiteCreate` payload shape
 - File upload uses `POST /files/upload` with both `file` and `path`
 

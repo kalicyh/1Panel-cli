@@ -121,6 +121,7 @@ npx --yes 1panel-cli -p ./dist -d example.com --non-interactive --json
 
 - CLI 现在对接当前 1Panel API 基础路径 `/api/v2`
 - 网站列表优先使用 `GET /websites/list`
+- 当列表响应里没有 `sitePath` 时，上传前会继续调用 `GET /websites/:id` 获取完整站点路径
 - 自动建站使用当前 `request.WebsiteCreate` 请求体结构
 - 文件上传使用 `POST /files/upload`，同时提交 `file` 和 `path`
 
