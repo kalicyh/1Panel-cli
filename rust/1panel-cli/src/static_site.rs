@@ -49,11 +49,20 @@ fn auth_headers(api_key: &str) -> (String, String) {
 }
 
 fn v2_base(cfg: &OnePanelConfig) -> String {
-    format!("http://{}:{}/api/v2", clean_host(&cfg.host), cfg.port)
+    format!(
+        "{}://{}:{}/api/v2",
+        cfg.scheme,
+        clean_host(&cfg.host),
+        cfg.port
+    )
 }
 
-fn client() -> Client {
-    Client::builder().no_proxy().build().unwrap_or_else(|_| Client::new())
+fn client(cfg: &OnePanelConfig) -> Client {
+    Client::builder()
+        .no_proxy()
+        .danger_accept_invalid_certs(cfg.insecure_skip_tls_verify)
+        .build()
+        .unwrap_or_else(|_| Client::new())
 }
 
 fn unwrap_data(json: &Value) -> Value {
@@ -119,7 +128,7 @@ fn normalize_website(v: &Value) -> Website {
 pub async fn list_websites(cfg: &OnePanelConfig) -> Result<Vec<Website>> {
     let api = v2_base(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let c = client();
+    let c = client(cfg);
 
     let list_url = format!("{}/websites/list", api);
     let res = c
@@ -172,7 +181,7 @@ pub async fn list_websites(cfg: &OnePanelConfig) -> Result<Vec<Website>> {
 async fn get_website_by_id(cfg: &OnePanelConfig, id: u64) -> Result<Website> {
     let api = v2_base(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let c = client();
+    let c = client(cfg);
     let resp = c
         .get(format!("{}/websites/{}", api, id))
         .header("1Panel-Token", token)
@@ -211,7 +220,7 @@ async fn resolve_group_id(cfg: &OnePanelConfig, preferred: Option<u64>) -> Resul
 
     let api = v2_base(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let c = client();
+    let c = client(cfg);
 
     let resp = c
         .post(format!("{}/groups/search", api))
@@ -254,7 +263,7 @@ pub async fn create_website(
     let website_group_id = resolve_group_id(cfg, group_id).await?;
     let api = v2_base(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let c = client();
+    let c = client(cfg);
 
     let req = serde_json::json!({
         "type": "static",
@@ -293,7 +302,7 @@ pub async fn create_website(
 async fn upload_single_file(cfg: &OnePanelConfig, file_path: &Path, target_dir: &str) -> Result<()> {
     let api = v2_base(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let c = client();
+    let c = client(cfg);
 
     let file_name = file_path
         .file_name()
@@ -422,6 +431,15 @@ pub async fn deploy_static(
             Ok(_) => uploaded += 1,
             Err(_) => failed += 1,
         }
+    }
+
+    if failed > 0 {
+        return Err(anyhow!(
+            "static deploy failed: uploaded {}/{} files, {} failed",
+            uploaded,
+            total,
+            failed
+        ));
     }
 
     Ok(DeployStaticResult {

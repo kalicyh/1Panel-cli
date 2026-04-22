@@ -1,64 +1,73 @@
-# 1panel-cli
+# 1panel-cli (Rust)
 
-独立部署工具（无数据库），用于 CI 中将本地 Docker 镜像发布到 1Panel。
+独立部署工具（无数据库），用于 CI 中将静态站点和 Docker 镜像发布到 1Panel。
 
 ## Build
 
 ```bash
-cargo build -p onepanel-cli --release
+cargo build --manifest-path ./rust/1panel-cli/Cargo.toml --release
 ```
 
-## Commands
+## Core Commands
 
 ```bash
-# 1) 连接测试
-cargo run -p onepanel-cli -- server-test --host 1.2.3.4 --port 9999 --api-key xxx
+# 查看全部命令
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- --help
 
-# 2) 导出本地镜像
-cargo run -p onepanel-cli -- image-export --image-tag myapp:sha-123 --output /tmp/myapp.tar
+# 1) 设置本地默认配置（只需一次）
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
+  set --base-url https://nz.com --api-key <API_KEY> --insecure true
 
-# 3) 上传镜像包到 1Panel
-cargo run -p onepanel-cli -- image-upload \
-  --host 1.2.3.4 --port 9999 --api-key xxx \
-  --input /tmp/myapp.tar --remote-dir /opt/1panel/tmp
+# 2) 查看本地配置
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- config
 
-# 4) 在 1Panel 导入镜像
-cargo run -p onepanel-cli -- deploy-load \
-  --host 1.2.3.4 --port 9999 --api-key xxx \
-  --remote-path /opt/1panel/tmp/myapp.tar
+# 3) 清除某个配置项
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- config --unset api-key
 
-# 5) 一键流程（export -> upload -> load）
-cargo run -p onepanel-cli -- deploy-all \
-  --host 1.2.3.4 --port 9999 --api-key xxx \
-  --image-tag myapp:sha-123
+# 4) 按域名更新静态网站
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
+  deploy --path ./dist --domain example.com --create-if-missing
 
-# 6) 更新 compose 镜像
-cargo run -p onepanel-cli -- deploy-compose-update \
-  --host 1.2.3.4 --port 9999 --api-key xxx \
-  --compose-name my-stack \
-  --compose-path /opt/1panel/docker/compose/my-stack/docker-compose.yml \
-  --service web \
-  --to-image myapp:sha-123 \
-  --dry-run
+# 5) 列出编排文件（用于选择）
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- list-composes
+
+# 6) 更新 compose 镜像并部署（推荐先 --dry-run）
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
+  deploy-compose-update \
+  --compose-name wiki \
+  --compose-path /opt/1panel/docker/compose/wiki/docker-compose.yml \
+  --from-image gitea.nz.com/tigger/wiki:v1.0.1 \
+  --to-image gitea.nz.com/tigger/wiki:v1.0.2 \
+  --apply
+
+# 7) 一键流程：导出镜像 -> 上传 -> load -> 更新 compose -> up
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
+  deploy-all-compose \
+  --image-tag gitea.nz.com/tigger/wiki:v1.0.2 \
+  --compose-name wiki \
+  --compose-path /opt/1panel/docker/compose/wiki/docker-compose.yml \
+  --from-image gitea.nz.com/tigger/wiki:v1.0.1 \
+  --service wiki \
+  --apply
 ```
 
-`deploy-compose-update` 保护策略：必须传 `--service` 或 `--from-image`，避免全量误替换。
+## Three Scenarios
 
-## GitHub Actions 示例
+1. 根据域名更新静态网站：`deploy --path ... --domain ...`
+2. 选择编排文件更新镜像部署：`list-composes` + `deploy-compose-update`
+3. 导出上传后按编排部署：`deploy-all-compose`
 
-```yaml
-- name: Build CLI
-  run: cargo build -p onepanel-cli --release
+## TLS 证书
 
-- name: Deploy image to 1Panel
-  env:
-    ONEPANEL_HOST: ${{ secrets.ONEPANEL_HOST }}
-    ONEPANEL_PORT: ${{ secrets.ONEPANEL_PORT }}
-    ONEPANEL_API_KEY: ${{ secrets.ONEPANEL_API_KEY }}
-  run: |
-    ./target/release/1panel-cli deploy-all \
-      --host "$ONEPANEL_HOST" \
-      --port "$ONEPANEL_PORT" \
-      --api-key "$ONEPANEL_API_KEY" \
-      --image-tag "myapp:${GITHUB_SHA}"
-```
+- 使用 `--insecure` 忽略 TLS 证书校验
+- 或设置环境变量：`ONEPANEL_INSECURE=true`
+
+## Config
+
+本地配置文件：`~/.1panel-cli/config.json`
+
+优先级：
+
+1. 命令行参数
+2. 环境变量
+3. 本地配置

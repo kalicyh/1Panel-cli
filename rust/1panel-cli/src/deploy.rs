@@ -178,6 +178,21 @@ pub async fn deploy_all(
     Ok((export, upload))
 }
 
+pub async fn deploy_all_and_compose(
+    cfg: &OnePanelConfig,
+    image_tag: &str,
+    remote_dir: &str,
+    keep_local_tar: bool,
+    mut compose: ComposeUpdateOpts,
+) -> Result<(ExportResult, UploadResult, ComposeUpdateResult)> {
+    let (export, upload) = deploy_all(cfg, image_tag, remote_dir, keep_local_tar).await?;
+    if compose.to_image.trim().is_empty() {
+        compose.to_image = image_tag.to_string();
+    }
+    let compose_result = run_compose_update(cfg, compose).await?;
+    Ok((export, upload, compose_result))
+}
+
 fn temp_tar_path(image_tag: &str) -> PathBuf {
     let safe = image_tag.replace(['/', ':', '@'], "_");
     std::env::temp_dir().join(format!("{}_image.tar", safe))
