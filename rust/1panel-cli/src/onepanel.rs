@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Result};
 use chrono::Utc;
 use reqwest::{multipart, Client};
+use serde::Serialize;
 use serde_json::Value;
 use std::path::Path;
 
@@ -9,14 +10,31 @@ pub struct OnePanelConfig {
     pub host: String,
     pub port: u16,
     pub api_key: String,
+    pub scheme: String,
+    pub insecure_skip_tls_verify: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct ComposeInfo {
+    pub name: String,
+    pub path: String,
+    pub status: Option<String>,
 }
 
 impl OnePanelConfig {
-    pub fn new(host: String, port: u16, api_key: String) -> Self {
+    pub fn new(
+        host: String,
+        port: u16,
+        api_key: String,
+        scheme: String,
+        insecure_skip_tls_verify: bool,
+    ) -> Self {
         Self {
             host,
             port,
             api_key,
+            scheme,
+            insecure_skip_tls_verify,
         }
     }
 }
@@ -36,8 +54,21 @@ fn auth_headers(api_key: &str) -> (String, String) {
     (format!("{:x}", token_digest), timestamp.to_string())
 }
 
-fn get_client() -> Client {
-    Client::builder().no_proxy().build().unwrap_or_else(|_| Client::new())
+fn get_client(cfg: &OnePanelConfig) -> Client {
+    Client::builder()
+        .no_proxy()
+        .danger_accept_invalid_certs(cfg.insecure_skip_tls_verify)
+        .build()
+        .unwrap_or_else(|_| Client::new())
+}
+
+fn v2_base(cfg: &OnePanelConfig) -> String {
+    format!(
+        "{}://{}:{}/api/v2",
+        cfg.scheme,
+        clean_host(&cfg.host),
+        cfg.port
+    )
 }
 
 async fn check_api_code(resp: reqwest::Response, action: &str) -> Result<Value> {
@@ -64,11 +95,52 @@ async fn check_api_code(resp: reqwest::Response, action: &str) -> Result<Value> 
     Ok(json)
 }
 
-pub async fn test_connection(cfg: &OnePanelConfig) -> Result<()> {
-    let client = get_client();
-    let host = clean_host(&cfg.host);
+pub async fn list_composes(cfg: &OnePanelConfig, info: Option<&str>) -> Result<Vec<ComposeInfo>> {
+    let client = get_client(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let url = format!("http://{}:{}/api/v1/system/info", host, cfg.port);
+
+    let resp = client
+        .post(format!("{}/containers/compose/search", v2_base(cfg)))
+        .header("1Panel-Token", token)
+        .header("1Panel-Timestamp", ts)
+        .json(&serde_json::json!({
+            "page": 1,
+            "pageSize": 200,
+            "info": info.unwrap_or("")
+        }))
+        .send()
+        .await?;
+
+    let json = check_api_code(resp, "list_composes").await?;
+    let items = json
+        .get("data")
+        .and_then(|d| d.get("items"))
+        .and_then(|x| x.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut out = Vec::new();
+    for item in items {
+        let name = item.get("name").and_then(|x| x.as_str()).unwrap_or_default();
+        let path = item.get("path").and_then(|x| x.as_str()).unwrap_or_default();
+        if name.is_empty() || path.is_empty() {
+            continue;
+        }
+
+        out.push(ComposeInfo {
+            name: name.to_string(),
+            path: path.to_string(),
+            status: item.get("status").map(|s| s.to_string()),
+        });
+    }
+
+    Ok(out)
+}
+
+pub async fn test_connection(cfg: &OnePanelConfig) -> Result<()> {
+    let client = get_client(cfg);
+    let (token, ts) = auth_headers(&cfg.api_key);
+    let url = format!("{}/websites/list", v2_base(cfg));
 
     let resp = client
         .get(url)
@@ -82,10 +154,9 @@ pub async fn test_connection(cfg: &OnePanelConfig) -> Result<()> {
 }
 
 pub async fn upload_file(cfg: &OnePanelConfig, file_path: &Path, remote_dir: &str) -> Result<String> {
-    let client = get_client();
-    let host = clean_host(&cfg.host);
+    let client = get_client(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let url = format!("http://{}:{}/api/v1/files/upload", host, cfg.port);
+    let url = format!("{}/files/upload", v2_base(cfg));
 
     let file_name = file_path
         .file_name()
@@ -120,16 +191,15 @@ pub async fn upload_file(cfg: &OnePanelConfig, file_path: &Path, remote_dir: &st
 }
 
 pub async fn load_image(cfg: &OnePanelConfig, remote_path: &str) -> Result<()> {
-    let client = get_client();
-    let host = clean_host(&cfg.host);
+    let client = get_client(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let url = format!("http://{}:{}/api/v1/containers/image/load", host, cfg.port);
+    let url = format!("{}/containers/image/load", v2_base(cfg));
 
     let resp = client
         .post(url)
         .header("1Panel-Token", token)
         .header("1Panel-Timestamp", ts)
-        .json(&serde_json::json!({ "path": remote_path }))
+        .json(&serde_json::json!({ "paths": [remote_path] }))
         .send()
         .await?;
 
@@ -138,10 +208,9 @@ pub async fn load_image(cfg: &OnePanelConfig, remote_path: &str) -> Result<()> {
 }
 
 pub async fn read_file(cfg: &OnePanelConfig, path: &str) -> Result<String> {
-    let client = get_client();
-    let host = clean_host(&cfg.host);
+    let client = get_client(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let url = format!("http://{}:{}/api/v1/files/content", host, cfg.port);
+    let url = format!("{}/files/content", v2_base(cfg));
 
     let resp = client
         .post(url)
@@ -162,10 +231,9 @@ pub async fn read_file(cfg: &OnePanelConfig, path: &str) -> Result<String> {
 }
 
 pub async fn update_compose(cfg: &OnePanelConfig, name: &str, path: &str, content: &str) -> Result<()> {
-    let client = get_client();
-    let host = clean_host(&cfg.host);
+    let client = get_client(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let url = format!("http://{}:{}/api/v1/containers/compose/update", host, cfg.port);
+    let url = format!("{}/containers/compose/update", v2_base(cfg));
 
     let resp = client
         .post(url)
@@ -175,7 +243,7 @@ pub async fn update_compose(cfg: &OnePanelConfig, name: &str, path: &str, conten
             "name": name,
             "path": path,
             "content": content,
-            "env": []
+            "env": ""
         }))
         .send()
         .await?;
@@ -185,10 +253,9 @@ pub async fn update_compose(cfg: &OnePanelConfig, name: &str, path: &str, conten
 }
 
 pub async fn operate_compose(cfg: &OnePanelConfig, name: &str, path: &str, operation: &str) -> Result<()> {
-    let client = get_client();
-    let host = clean_host(&cfg.host);
+    let client = get_client(cfg);
     let (token, ts) = auth_headers(&cfg.api_key);
-    let url = format!("http://{}:{}/api/v1/containers/compose/operate", host, cfg.port);
+    let url = format!("{}/containers/compose/operate", v2_base(cfg));
 
     let resp = client
         .post(url)
