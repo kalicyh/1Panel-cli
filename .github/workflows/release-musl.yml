@@ -44,7 +44,23 @@ jobs:
 
       - name: Prepare artifact
         run: |
-          cp target/${{ matrix.target }}/release/1panel-cli ${{ matrix.asset_name }}
+          set -euo pipefail
+          BIN_PATH=""
+          for p in \
+            "target/${{ matrix.target }}/release/1panel-cli" \
+            "rust/1panel-cli/target/${{ matrix.target }}/release/1panel-cli"
+          do
+            if [ -f "$p" ]; then
+              BIN_PATH="$p"
+              break
+            fi
+          done
+          if [ -z "$BIN_PATH" ]; then
+            echo "Cannot find built binary for target ${{ matrix.target }}"
+            find . -type f -name 1panel-cli | head -n 50
+            exit 1
+          fi
+          cp "$BIN_PATH" "${{ matrix.asset_name }}"
           chmod +x ${{ matrix.asset_name }}
 
       - name: Upload artifact
