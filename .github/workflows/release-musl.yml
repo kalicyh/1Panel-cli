@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: "Release tag (e.g. v1.2.3)"
+        description: "Release tag (e.g. v0.1.2)"
         required: true
         type: string
 
@@ -33,14 +33,19 @@ jobs:
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
-      - name: Build MUSL binary
-        uses: houseabsolute/actions-rust-cross@v1
-        with:
-          command: build
-          target: ${{ matrix.target }}
-          args: "--release --locked --manifest-path rust/1panel-cli/Cargo.toml --bin 1panel-cli"
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Setup Zig
+        uses: mlugg/setup-zig@v2
+
+      - name: Install cargo-zigbuild
+        uses: taiki-e/install-action@cargo-zigbuild
+
+      - name: Build MUSL binary with zigbuild
+        run: cargo zigbuild --release --locked --manifest-path rust/1panel-cli/Cargo.toml --bin 1panel-cli --target ${{ matrix.target }}
 
       - name: Prepare artifact
         run: |
