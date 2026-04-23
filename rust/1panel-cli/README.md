@@ -34,8 +34,8 @@ cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- list-composes
 # 6) 更新 compose 镜像并部署（推荐先 --dry-run）
 cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
   deploy-compose-update \
-  --compose-name wiki \
   --compose-path /opt/1panel/docker/compose/wiki/docker-compose.yml \
+  --service docmost \
   --from-image gitea.nz.com/tigger/wiki:v1.0.1 \
   --to-image gitea.nz.com/tigger/wiki:v1.0.2 \
   --apply
@@ -44,10 +44,9 @@ cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
 cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
   deploy-all-compose \
   --image-tag gitea.nz.com/tigger/wiki:v1.0.2 \
-  --compose-name wiki \
   --compose-path /opt/1panel/docker/compose/wiki/docker-compose.yml \
   --from-image gitea.nz.com/tigger/wiki:v1.0.1 \
-  --service wiki \
+  --service docmost \
   --apply
 ```
 
