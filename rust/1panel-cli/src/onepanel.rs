@@ -71,6 +71,24 @@ fn v2_base(cfg: &OnePanelConfig) -> String {
     )
 }
 
+fn parse_json_body(body: &str, action: &str) -> Result<Value> {
+    if let Ok(json) = serde_json::from_str::<Value>(body) {
+        return Ok(json);
+    }
+
+    for (idx, ch) in body.char_indices() {
+        if ch != '{' && ch != '[' {
+            continue;
+        }
+
+        if let Ok(json) = serde_json::from_str::<Value>(&body[idx..]) {
+            return Ok(json);
+        }
+    }
+
+    Err(anyhow!("{} response parse failed | body: {}", action, body))
+}
+
 async fn check_api_code(resp: reqwest::Response, action: &str) -> Result<Value> {
     let status = resp.status();
     let body = resp.text().await.unwrap_or_default();
@@ -79,8 +97,7 @@ async fn check_api_code(resp: reqwest::Response, action: &str) -> Result<Value> 
         return Err(anyhow!("{} failed: {} - {}", action, status, body));
     }
 
-    let json: Value = serde_json::from_str(&body)
-        .map_err(|e| anyhow!("{} response parse failed: {} | body: {}", action, e, body))?;
+    let json = parse_json_body(&body, action)?;
 
     if let Some(code) = json.get("code").and_then(|c| c.as_i64()) {
         if code != 200 {
@@ -190,7 +207,7 @@ pub async fn upload_file(cfg: &OnePanelConfig, file_path: &Path, remote_dir: &st
     let dir = remote_dir.trim_end_matches('/');
     let inferred_path = format!("{}/{}", dir, file_name);
 
-    let json: Value = match serde_json::from_str(&body) {
+    let json = match parse_json_body(&body, "upload_file") {
         Ok(json) => json,
         Err(_) => return Ok(inferred_path),
     };
@@ -225,7 +242,28 @@ pub async fn load_image(cfg: &OnePanelConfig, remote_path: &str) -> Result<()> {
         .send()
         .await?;
 
-    check_api_code(resp, "load_image").await?;
+    let status = resp.status();
+    let body = resp.text().await.unwrap_or_default();
+
+    if !status.is_success() {
+        return Err(anyhow!("load_image failed: {} - {}", status, body));
+    }
+
+    let json = match parse_json_body(&body, "load_image") {
+        Ok(json) => json,
+        Err(_) => return Ok(()),
+    };
+
+    if let Some(code) = json.get("code").and_then(|c| c.as_i64()) {
+        if code != 200 {
+            let msg = json
+                .get("message")
+                .and_then(|m| m.as_str())
+                .unwrap_or("Unknown error");
+            return Err(anyhow!("load_image failed (API {}): {}", code, msg));
+        }
+    }
+
     Ok(())
 }
 
@@ -270,6 +308,25 @@ pub async fn update_compose(cfg: &OnePanelConfig, _name: &str, path: &str, conte
 
     check_api_code(resp, "update_compose").await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_json_body;
+
+    #[test]
+    fn parses_plain_json_body() {
+        let json = parse_json_body(r#"{"code":200,"data":{"ok":true}}"#, "test")
+            .expect("expected json");
+        assert_eq!(json["code"].as_i64(), Some(200));
+    }
+
+    #[test]
+    fn parses_json_body_after_html_prefix() {
+        let body = "<!DOCTYPE html><html><body>blocked</body></html>{\"code\":200,\"data\":null}";
+        let json = parse_json_body(body, "test").expect("expected json");
+        assert_eq!(json["code"].as_i64(), Some(200));
+    }
 }
 
 pub async fn operate_compose(cfg: &OnePanelConfig, name: &str, path: &str, operation: &str) -> Result<()> {
