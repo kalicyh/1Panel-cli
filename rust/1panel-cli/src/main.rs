@@ -521,12 +521,6 @@ async fn run() -> Result<()> {
             dry_run,
             apply,
         } => {
-            if service.is_none() && from_image.is_none() {
-                return Err(anyhow!(
-                    "compose update requires --service or --from-image to avoid accidental global replacement"
-                ));
-            }
-
             let result = deploy::run_compose_update(
                 &cfg_from(&auth)?,
                 ComposeUpdateOpts {
@@ -580,12 +574,6 @@ async fn run() -> Result<()> {
             from_image,
             apply,
         } => {
-            if service.is_none() && from_image.is_none() {
-                return Err(anyhow!(
-                    "deploy-all-compose requires --service or --from-image to avoid accidental global replacement"
-                ));
-            }
-
             let cfg = cfg_from(&auth)?;
             let compose_result = deploy::deploy_all_and_compose(
                 &cfg,

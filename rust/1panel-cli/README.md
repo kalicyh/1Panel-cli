@@ -35,7 +35,6 @@ cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- list-composes
 cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
   deploy-compose-update \
   --compose-path /opt/1panel/docker/compose/example-app/docker-compose.yml \
-  --service docmost \
   --from-image registry.example.com/example/app:v1.0.1 \
   --to-image registry.example.com/example/app:v1.0.2 \
   --apply
@@ -45,8 +44,6 @@ cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
   deploy-all-compose \
   --image-tag registry.example.com/example/app:v1.0.2 \
   --compose-path /opt/1panel/docker/compose/example-app/docker-compose.yml \
-  --from-image registry.example.com/example/app:v1.0.1 \
-  --service docmost \
   --apply
 ```
 

@@ -238,7 +238,37 @@ fn temp_tar_path(image_tag: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_compose_name;
+    use super::{resolve_compose_name, update_compose_images, ComposeUpdateOpts};
+
+    fn multi_service_compose() -> &'static str {
+        r#"
+services:
+  app:
+    image: example/app:v1
+  worker:
+    image: example/worker:v1
+"#
+    }
+
+    fn single_service_compose() -> &'static str {
+        r#"
+services:
+  docmost:
+    image: gitea.nz.com/tigger/wiki:v1.0.1
+"#
+    }
+
+    fn opts(service: Option<&str>, from_image: Option<&str>, to_image: &str) -> ComposeUpdateOpts {
+        ComposeUpdateOpts {
+            compose_name: "wiki".to_string(),
+            compose_path: "/opt/1panel/docker/compose/wiki/docker-compose.yml".to_string(),
+            service: service.map(ToString::to_string),
+            from_image: from_image.map(ToString::to_string),
+            to_image: to_image.to_string(),
+            dry_run: false,
+            apply: false,
+        }
+    }
 
     #[test]
     fn keeps_explicit_compose_name() {
@@ -259,5 +289,50 @@ mod tests {
     fn infers_compose_name_from_file_stem_when_parent_missing() {
         let name = resolve_compose_name(None, "docker-compose.yml").expect("expected compose name");
         assert_eq!(name, "docker-compose");
+    }
+
+    #[test]
+    fn updates_all_image_services_when_no_filters_are_provided() {
+        let (_, changes) = update_compose_images(
+            multi_service_compose(),
+            &opts(None, None, "example/new:v2"),
+        )
+        .expect("expected compose update");
+        assert_eq!(changes.len(), 2);
+        assert_eq!(changes[0].service, "app");
+        assert_eq!(changes[1].service, "worker");
+    }
+
+    #[test]
+    fn filters_by_from_image_when_present() {
+        let (_, changes) = update_compose_images(
+            multi_service_compose(),
+            &opts(None, Some("example/worker:v1"), "example/new:v2"),
+        )
+        .expect("expected compose update");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].service, "worker");
+    }
+
+    #[test]
+    fn filters_by_explicit_service_when_present() {
+        let (_, changes) = update_compose_images(
+            multi_service_compose(),
+            &opts(Some("app"), None, "example/new:v2"),
+        )
+        .expect("expected compose update");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].service, "app");
+    }
+
+    #[test]
+    fn updates_single_service_compose_without_filters() {
+        let (_, changes) = update_compose_images(
+            single_service_compose(),
+            &opts(None, None, "gitea.nz.com/tigger/wiki:v1.0.2"),
+        )
+        .expect("expected compose update");
+        assert_eq!(changes.len(), 1);
+        assert_eq!(changes[0].service, "docmost");
     }
 }
