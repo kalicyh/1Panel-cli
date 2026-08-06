@@ -2,6 +2,7 @@ use crate::onepanel::{self, OnePanelConfig};
 use anyhow::{Result, anyhow};
 use serde::Serialize;
 use serde_yaml::Value;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use tokio::process::Command;
 
@@ -29,6 +30,33 @@ pub struct ComposeUpdateResult {
     pub dry_run: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ServiceImageUpdate {
+    service: String,
+    image: String,
+}
+
+impl std::str::FromStr for ServiceImageUpdate {
+    type Err = String;
+
+    fn from_str(value: &str) -> std::result::Result<Self, Self::Err> {
+        let (service, image) = value
+            .split_once('=')
+            .ok_or_else(|| "expected SERVICE=IMAGE".to_string())?;
+        let service = service.trim();
+        let image = image.trim();
+
+        if service.is_empty() || image.is_empty() {
+            return Err("expected non-empty SERVICE=IMAGE".to_string());
+        }
+
+        Ok(Self {
+            service: service.to_string(),
+            image: image.to_string(),
+        })
+    }
+}
+
 #[derive(Debug)]
 pub struct ComposeUpdateOpts {
     pub compose_name: String,
@@ -36,6 +64,7 @@ pub struct ComposeUpdateOpts {
     pub service: Option<String>,
     pub from_image: Option<String>,
     pub to_image: String,
+    pub image_updates: Vec<ServiceImageUpdate>,
     pub dry_run: bool,
     pub apply: bool,
 }
@@ -121,6 +150,25 @@ pub fn update_compose_images(
 ) -> Result<(String, Vec<ImageChange>)> {
     let mut root: Value = serde_yaml::from_str(content)?;
     let mut changes = Vec::new();
+    let mut image_updates = HashMap::new();
+
+    for update in &opts.image_updates {
+        if image_updates
+            .insert(update.service.as_str(), update.image.as_str())
+            .is_some()
+        {
+            return Err(anyhow!(
+                "duplicate image update for service: {}",
+                update.service
+            ));
+        }
+    }
+
+    if image_updates.is_empty() && opts.to_image.trim().is_empty() {
+        return Err(anyhow!("--to-image or --image-update is required"));
+    }
+
+    let mut matched_updates = HashSet::new();
 
     let root_map = root
         .as_mapping_mut()
@@ -140,11 +188,19 @@ pub fn update_compose_images(
             None => continue,
         };
 
-        if let Some(target_service) = &opts.service {
-            if &service_name != target_service {
+        let target_image = if image_updates.is_empty() {
+            if let Some(target_service) = &opts.service
+                && &service_name != target_service
+            {
                 continue;
             }
-        }
+            opts.to_image.as_str()
+        } else {
+            let Some(target_image) = image_updates.get(service_name.as_str()).copied() else {
+                continue;
+            };
+            target_image
+        };
 
         let Some(service_obj) = services
             .get_mut(&service_key)
@@ -158,23 +214,41 @@ pub fn update_compose_images(
             continue;
         };
 
-        if let Some(from_image) = &opts.from_image {
-            if current_image != from_image {
-                continue;
-            }
+        if !image_updates.is_empty() {
+            matched_updates.insert(service_name.clone());
         }
 
-        if current_image == opts.to_image {
+        if image_updates.is_empty()
+            && let Some(from_image) = &opts.from_image
+            && current_image != from_image
+        {
+            continue;
+        }
+
+        if current_image == target_image {
             continue;
         }
 
         changes.push(ImageChange {
             service: service_name,
             from: current_image.to_string(),
-            to: opts.to_image.clone(),
+            to: target_image.to_string(),
         });
 
-        service_obj.insert(image_key, Value::String(opts.to_image.clone()));
+        service_obj.insert(image_key, Value::String(target_image.to_string()));
+    }
+
+    if matched_updates.len() != image_updates.len() {
+        let mut missing: Vec<_> = image_updates
+            .keys()
+            .filter(|service| !matched_updates.contains(**service))
+            .copied()
+            .collect();
+        missing.sort_unstable();
+        return Err(anyhow!(
+            "compose services not found or missing image entries: {}",
+            missing.join(", ")
+        ));
     }
 
     if changes.is_empty() {
@@ -233,7 +307,7 @@ pub async fn deploy_all_and_compose(
     mut compose: ComposeUpdateOpts,
 ) -> Result<(ExportResult, UploadResult, ComposeUpdateResult)> {
     let (export, upload) = deploy_all(cfg, image_tag, remote_dir, keep_local_tar).await?;
-    if compose.to_image.trim().is_empty() {
+    if compose.image_updates.is_empty() && compose.to_image.trim().is_empty() {
         compose.to_image = image_tag.to_string();
     }
     let compose_result = run_compose_update(cfg, compose).await?;
@@ -247,7 +321,10 @@ fn temp_tar_path(image_tag: &str) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use super::{ComposeUpdateOpts, resolve_compose_name, update_compose_images};
+    use super::{
+        ComposeUpdateOpts, ServiceImageUpdate, resolve_compose_name, update_compose_images,
+    };
+    use serde_yaml::Value;
 
     fn multi_service_compose() -> &'static str {
         r#"
@@ -274,9 +351,16 @@ services:
             service: service.map(ToString::to_string),
             from_image: from_image.map(ToString::to_string),
             to_image: to_image.to_string(),
+            image_updates: Vec::new(),
             dry_run: false,
             apply: false,
         }
+    }
+
+    fn image_update(service: &str, image: &str) -> ServiceImageUpdate {
+        format!("{service}={image}")
+            .parse()
+            .expect("expected service image update")
     }
 
     #[test]
@@ -343,5 +427,72 @@ services:
         .expect("expected compose update");
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].service, "docmost");
+    }
+
+    #[test]
+    fn updates_multiple_services_to_distinct_images_in_one_pass() {
+        let content = r#"
+services:
+  init-permissions:
+    image: example/controller:v1
+    command:
+      - chmod 0700 /controller
+  controller:
+    image: example/controller:v1
+    depends_on:
+      init-permissions:
+        condition: service_completed_successfully
+  node:
+    image: example/node:v1
+    ports:
+      - "60001:60001/udp"
+networks:
+  1panel-network:
+    external: true
+"#;
+        let mut options = opts(None, None, "");
+        options.image_updates = vec![
+            image_update("init-permissions", "example/controller:v2"),
+            image_update("controller", "example/controller:v2"),
+            image_update("node", "example/node:v2"),
+        ];
+
+        let (updated, changes) =
+            update_compose_images(content, &options).expect("expected compose update");
+        let updated: Value = serde_yaml::from_str(&updated).expect("expected valid YAML");
+
+        assert_eq!(changes.len(), 3);
+        assert_eq!(
+            updated["services"]["init-permissions"]["image"].as_str(),
+            Some("example/controller:v2")
+        );
+        assert_eq!(
+            updated["services"]["controller"]["image"].as_str(),
+            Some("example/controller:v2")
+        );
+        assert_eq!(
+            updated["services"]["node"]["image"].as_str(),
+            Some("example/node:v2")
+        );
+        assert_eq!(
+            updated["services"]["node"]["ports"][0].as_str(),
+            Some("60001:60001/udp")
+        );
+        assert_eq!(
+            updated["services"]["controller"]["depends_on"]["init-permissions"]["condition"]
+                .as_str(),
+            Some("service_completed_successfully")
+        );
+    }
+
+    #[test]
+    fn rejects_missing_service_in_multi_image_update() {
+        let mut options = opts(None, None, "");
+        options.image_updates = vec![image_update("missing", "example/missing:v2")];
+
+        let error = update_compose_images(multi_service_compose(), &options)
+            .expect_err("expected missing service error");
+
+        assert!(error.to_string().contains("missing"));
     }
 }

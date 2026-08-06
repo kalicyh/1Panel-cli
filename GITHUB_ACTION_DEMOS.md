@@ -169,6 +169,25 @@ jobs:
           apply: true
 ```
 
+### Multiple Images in One Compose
+
+Use newline-separated `SERVICE=IMAGE` mappings to update the compose file once and run compose up once.
+
+```yaml
+- name: Update all Hyper services
+  uses: kalicyh/1Panel-rocket-cli@v1
+  with:
+    command: deploy-compose-update
+    base-url: ${{ secrets.ONEPANEL_BASE_URL }}
+    api-key: ${{ secrets.ONEPANEL_API_KEY }}
+    compose-path: /opt/1panel/docker/compose/hyper/docker-compose.yml
+    image-updates: |
+      init-permissions=gitea.nz.com/tigger/hyper-services-controller:v0.23.7
+      controller=gitea.nz.com/tigger/hyper-services-controller:v0.23.7
+      node=gitea.nz.com/tigger/hyper-services-node:v0.23.7
+    apply: true
+```
+
 ## Demo 6: Export, Upload, Load, Update Compose
 
 Build a Docker image in GitHub Actions, export it as a tarball, upload it to 1Panel, load it on the server, update compose, and apply.

@@ -47,6 +47,18 @@ cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
   --apply
 ```
 
+一个 compose 内需要同时更新多个不同镜像时，重复传入 `--image-update SERVICE=IMAGE`；整份文件只写回一次，并只执行一次 compose up：
+
+```bash
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
+  deploy-compose-update \
+  --compose-path /opt/1panel/docker/compose/hyper/docker-compose.yml \
+  --image-update init-permissions=gitea.nz.com/tigger/hyper-services-controller:v0.23.7 \
+  --image-update controller=gitea.nz.com/tigger/hyper-services-controller:v0.23.7 \
+  --image-update node=gitea.nz.com/tigger/hyper-services-node:v0.23.7 \
+  --apply
+```
+
 ## Three Scenarios
 
 1. 根据域名更新静态网站：`deploy --path ... --domain ...`
@@ -59,6 +71,8 @@ cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
   - `--compose-name` 可省略，会从 `--compose-path` 自动推导
   - `--service` 和 `--from-image` 都是可选过滤条件
   - 只传 `--compose-path + --to-image` 时，会把 compose 中所有 `image` 更新为目标镜像
+  - 可重复传入 `--image-update SERVICE=IMAGE`，在一次写回中更新多个服务的不同镜像
+  - `--image-update` 不能与 `--to-image`、`--service` 或 `--from-image` 混用
 - `deploy-all-compose`:
   - `--compose-name` 可省略，会从 `--compose-path` 自动推导
   - `--to-image` 可省略，默认等于 `--image-tag`

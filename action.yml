@@ -138,6 +138,10 @@ inputs:
     description: "Target image for compose updates. For deploy-all-compose, empty defaults to image-tag."
     required: false
     default: ""
+  image-updates:
+    description: "Newline-separated SERVICE=IMAGE mappings for updating multiple services in one compose-file update."
+    required: false
+    default: ""
   service:
     description: "Optional compose service name to update."
     required: false
@@ -210,6 +214,7 @@ runs:
         INPUT_COMPOSE_NAME: ${{ inputs.compose-name }}
         INPUT_COMPOSE_PATH: ${{ inputs.compose-path }}
         INPUT_TO_IMAGE: ${{ inputs.to-image }}
+        INPUT_IMAGE_UPDATES: ${{ inputs.image-updates }}
         INPUT_SERVICE: ${{ inputs.service }}
         INPUT_FROM_IMAGE: ${{ inputs.from-image }}
         INPUT_DRY_RUN: ${{ inputs.dry-run }}

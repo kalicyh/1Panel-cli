@@ -43,6 +43,19 @@ append_if_set() {
   fi
 }
 
+append_each_line() {
+  local flag="$1"
+  local value="$2"
+  local line
+
+  while IFS= read -r line; do
+    line="${line%$'\r'}"
+    if is_set "$line"; then
+      args+=("$flag" "$line")
+    fi
+  done <<< "$value"
+}
+
 append_auth_args() {
   append_if_set "--base-url" "${INPUT_BASE_URL:-}"
   append_if_set "--api-key" "${INPUT_API_KEY:-}"
@@ -143,13 +156,17 @@ case "$command" in
 
   deploy-compose-update)
     require_input "compose-path" "${INPUT_COMPOSE_PATH:-}"
-    require_input "to-image" "${INPUT_TO_IMAGE:-}"
+    if ! is_set "${INPUT_TO_IMAGE:-}" && ! is_set "${INPUT_IMAGE_UPDATES:-}"; then
+      die "to-image or image-updates is required for command: $command"
+    fi
     args+=("deploy-compose-update")
     append_auth_args
-    args+=("--compose-path" "$INPUT_COMPOSE_PATH" "--to-image" "$INPUT_TO_IMAGE")
+    args+=("--compose-path" "$INPUT_COMPOSE_PATH")
     append_if_set "--compose-name" "${INPUT_COMPOSE_NAME:-}"
+    append_if_set "--to-image" "${INPUT_TO_IMAGE:-}"
     append_if_set "--service" "${INPUT_SERVICE:-}"
     append_if_set "--from-image" "${INPUT_FROM_IMAGE:-}"
+    append_each_line "--image-update" "${INPUT_IMAGE_UPDATES:-}"
     if is_truthy "${INPUT_DRY_RUN:-false}"; then
       args+=("--dry-run")
     fi
@@ -180,6 +197,7 @@ case "$command" in
     append_if_set "--to-image" "${INPUT_TO_IMAGE:-}"
     append_if_set "--service" "${INPUT_SERVICE:-}"
     append_if_set "--from-image" "${INPUT_FROM_IMAGE:-}"
+    append_each_line "--image-update" "${INPUT_IMAGE_UPDATES:-}"
     if is_truthy "${INPUT_KEEP_LOCAL_TAR:-false}"; then
       args+=("--keep-local-tar")
     fi

@@ -59,6 +59,17 @@ cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
   --apply --json
 ```
 
+Update multiple services to different images in one compose update:
+
+```bash
+cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
+  deploy-compose-update \
+  --compose-path /opt/1panel/docker/compose/hyper/docker-compose.yml \
+  --image-update controller=registry.example.com/controller:v2 \
+  --image-update node=registry.example.com/node:v2 \
+  --apply --json
+```
+
 Full image pipeline + compose deploy:
 
 ```bash
@@ -77,7 +88,8 @@ cargo run --manifest-path ./rust/1panel-cli/Cargo.toml -- \
 - Prefer `--json` for automation.
 - Prefer `--base-url` over `--host` for HTTPS domains.
 - Use `--insecure` only for self-signed or untrusted certificates.
-- For compose updates, always provide `--service` or `--from-image`.
+- For single-image compose updates, always provide `--service` or `--from-image`.
+- For multi-image updates, provide one explicit `--image-update SERVICE=IMAGE` per service.
 - Run `--dry-run` first on production targets.
 
 ## Config precedence

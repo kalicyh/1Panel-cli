@@ -8,7 +8,7 @@ mod deploy;
 mod onepanel;
 mod static_site;
 
-use deploy::{ComposeUpdateOpts, ComposeUpdateResult};
+use deploy::{ComposeUpdateOpts, ComposeUpdateResult, ServiceImageUpdate};
 use onepanel::OnePanelConfig;
 
 #[derive(Parser, Debug)]
@@ -117,12 +117,23 @@ enum Commands {
         compose_name: Option<String>,
         #[arg(long)]
         compose_path: String,
-        #[arg(long)]
-        to_image: String,
+        #[arg(
+            long,
+            required_unless_present = "image_update",
+            conflicts_with = "image_update"
+        )]
+        to_image: Option<String>,
         #[arg(long)]
         service: Option<String>,
         #[arg(long)]
         from_image: Option<String>,
+        #[arg(
+            long = "image-update",
+            value_name = "SERVICE=IMAGE",
+            action = clap::ArgAction::Append,
+            conflicts_with_all = ["to_image", "service", "from_image"]
+        )]
+        image_update: Vec<ServiceImageUpdate>,
         #[arg(long, default_value_t = false)]
         dry_run: bool,
         #[arg(long, default_value_t = false)]
@@ -155,12 +166,19 @@ enum Commands {
         compose_name: Option<String>,
         #[arg(long)]
         compose_path: String,
-        #[arg(long)]
+        #[arg(long, conflicts_with = "image_update")]
         to_image: Option<String>,
         #[arg(long)]
         service: Option<String>,
         #[arg(long)]
         from_image: Option<String>,
+        #[arg(
+            long = "image-update",
+            value_name = "SERVICE=IMAGE",
+            action = clap::ArgAction::Append,
+            conflicts_with_all = ["to_image", "service", "from_image"]
+        )]
+        image_update: Vec<ServiceImageUpdate>,
         #[arg(long, default_value_t = true, action = clap::ArgAction::Set)]
         apply: bool,
     },
@@ -571,6 +589,7 @@ async fn run() -> Result<()> {
             to_image,
             service,
             from_image,
+            image_update,
             dry_run,
             apply,
         } => {
@@ -581,7 +600,8 @@ async fn run() -> Result<()> {
                     compose_path,
                     service,
                     from_image,
-                    to_image,
+                    to_image: to_image.unwrap_or_default(),
+                    image_updates: image_update,
                     dry_run,
                     apply,
                 },
@@ -626,6 +646,7 @@ async fn run() -> Result<()> {
             to_image,
             service,
             from_image,
+            image_update,
             apply,
         } => {
             let cfg = cfg_from(&auth)?;
@@ -639,7 +660,8 @@ async fn run() -> Result<()> {
                     compose_path,
                     service,
                     from_image,
-                    to_image: to_image.unwrap_or_else(|| image_tag.clone()),
+                    to_image: to_image.unwrap_or_default(),
+                    image_updates: image_update,
                     dry_run: false,
                     apply,
                 },
